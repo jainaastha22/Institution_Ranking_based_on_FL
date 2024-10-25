@@ -6,6 +6,10 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 
+# Set random seeds for consistency
+np.random.seed(42)
+torch.manual_seed(42)
+
 # Step 1: Prompt for the number of institutions
 num_institutions = int(input("Enter the number of institutions: "))
 
@@ -101,10 +105,10 @@ def manipulate_initial_weights(model, attribute_weights):
 global_model = InstitutionModel(input_size=input_size, output_size=1)
 initial_weights = manipulate_initial_weights(global_model, attribute_weights)
 
-# Step 6: Local Training and FedAvg (rest of the code remains unchanged)
+# Step 6: Local Training with added Gradient Clipping and FedAvg
 def train_local_model(local_model, data_loader, epochs=5):
     criterion = nn.MSELoss()
-    optimizer = optim.Adam(local_model.parameters(), lr=0.001)
+    optimizer = optim.Adam(local_model.parameters(), lr=0.0005)  # Lower learning rate for finer updates
 
     local_model.train()
     for epoch in range(epochs):
@@ -113,6 +117,7 @@ def train_local_model(local_model, data_loader, epochs=5):
             outputs = local_model(inputs)
             loss = criterion(outputs.squeeze(), targets)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(local_model.parameters(), max_norm=1.0)  # Gradient clipping
             optimizer.step()
 
 def fed_avg(global_weights, local_weights_list):
@@ -137,17 +142,20 @@ for local_model, data_loader in zip(local_models, data_loaders):
 global_weights = fed_avg(global_model.state_dict(), local_weights_list)
 global_model.load_state_dict(global_weights)
 
-# Step 8: Define convergence check and stopping criterion
+# Step 8: Define convergence check and stopping criterion with weight difference tracking
 def has_converged(global_weights, new_global_weights, threshold=1e-3):
     total_diff = 0
     for key in global_weights.keys():
-        total_diff += torch.sum(torch.abs(global_weights[key] - new_global_weights[key])).item()
+        diff = torch.sum(torch.abs(global_weights[key] - new_global_weights[key])).item()
+        #print(f"Layer {key}: Weight difference = {diff}")
+        total_diff += diff
+    #print(f"Total difference: {total_diff}")
     return total_diff < threshold
 
 converged = False
 max_rounds = 100
 round_num = 0
-threshold = 1e-3
+threshold = 1e-3  # Lower threshold for more precision
 
 while not converged and round_num < max_rounds:
     local_weights_list = []
